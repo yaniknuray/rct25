@@ -1,5 +1,5 @@
 ARG VARIANT="4.3"
-FROM ghcr.io/rocker-org/devcontainer/tidyverse:${VARIANT}
+FROM ghcr.io/rocker-org/devcontainer/verse:${VARIANT}
 
 RUN install2.r --error --skipinstalled -n -1 \
         haven \
@@ -8,9 +8,8 @@ RUN install2.r --error --skipinstalled -n -1 \
         gt \
         flextable \
         marginaleffects \
+        pandoc \
     && rm -rf /tmp/downloaded_packages
-
-RUN quarto install tinytex
 
 # Install Python packages
 # COPY requirements.txt /tmp/pip-tmp/

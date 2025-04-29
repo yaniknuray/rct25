@@ -1,5 +1,4 @@
-ARG VARIANT="4.3"
-FROM ghcr.io/rocker-org/devcontainer/verse:${VARIANT}
+FROM rocker/verse:4.3
 
 RUN install2.r --error --skipinstalled -n -1 \
         haven \

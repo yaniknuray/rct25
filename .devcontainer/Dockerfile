@@ -8,7 +8,11 @@ RUN install2.r --error --skipinstalled -n -1 \
         flextable \
         marginaleffects \
         pandoc \
+        languageserver \
     && rm -rf /tmp/downloaded_packages
+
+# vscDebugger (needed for VS code R debugger extension is not on CRAN)
+RUN Rscript -e 'install.packages("vscDebugger", repos = "https://manuelhentschel.r-universe.dev")'
 
 # Install Python packages
 # COPY requirements.txt /tmp/pip-tmp/

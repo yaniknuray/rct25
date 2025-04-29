@@ -12,20 +12,21 @@
 	"customizations": {
 		"vscode": {
 			"extensions": [
-				// Add Jupyter and Python vscode extensions
 				"ms-python.python",
 				"ms-python.vscode-pylance",
 				"vsls-contrib.codetour",
-				"GitHub.copilot"
+				"GitHub.copilot",
+				"REditorSupport.r",
+				"RDebugger.r-debugger"
 			]
 		}
 	},
 
-	// Forward Jupyter and RStudio ports
+	// Forward RStudio ports
 	"forwardPorts": [8787],
 	"portsAttributes": {
 		"8787": {
-			"label": "Rstudio",
+			"label": "RStudio",
 			"requireLocalPort": true,
 			"onAutoForward": "ignore"
 		},

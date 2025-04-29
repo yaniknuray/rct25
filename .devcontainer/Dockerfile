@@ -10,7 +10,7 @@ RUN install2.r --error --skipinstalled -n -1 \
         marginaleffects \
     && rm -rf /tmp/downloaded_packages
 
-RUN quarto install tinytex --update-path
+RUN quarto install tinytex
 
 # Install Python packages
 # COPY requirements.txt /tmp/pip-tmp/

@@ -9,6 +9,10 @@ RUN install2.r --error --skipinstalled -n -1 \
         marginaleffects \
         pandoc \
         languageserver \
+        logger \
+        duckdb \
+        hms \
+        arrow \
     && rm -rf /tmp/downloaded_packages
 
 # vscDebugger (needed for VS code R debugger extension is not on CRAN)

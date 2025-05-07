@@ -11,6 +11,7 @@ PYTHON := python
 ACZ2018_FIGURE := output/acz2018_figure.pdf
 ACZ2018_DID_FIN := output/acz2018_did_fin.docx
 ACZ2018_DID_MKT := output/acz2018_did_mkt.docx
+ACZ2018_TABLE5 := output/acz2018_table5.pdf
 ORBIS_PANEL_BERLIN := data/precomputed/orbis_panel_berlin.rds
 
 # Data Targets
@@ -33,7 +34,7 @@ ORBIS_PANEL_DE := data/generated/orbis_panel_de.rds
 # Materials needed for main targets
 
 ALL_TARGETS := $(ACZ2018_FIGURE) $(ACZ2018_DID_FIN) $(ACZ2018_DID_MKT) \
-	$(ORBIS_PANEL_BERLIN) 
+	$(ACZ2018_TABLE5) $(ORBIS_PANEL_BERLIN) 
 
 
 # Phony targets
@@ -74,5 +75,8 @@ $(ACZ2018_FIGURE): data/external/acz2018.dta scripts/create_acz2018_figure.R
 $(ACZ2018_DID_FIN) $(ACZ2018_DID_MKT): data/external/acz2018.dta \
 	scripts/create_acz2018_did.R
 	$(RSCRIPT) scripts/create_acz2018_did.R
+	
+$(ACZ2018_TABLE5): data/external/acz2018.dta scripts/create_acz2018_table5.qmd
+	quarto render scripts/create_acz2018_table5.qmd -o acz2018_table5.pdf --quiet
 
-# None yet
+

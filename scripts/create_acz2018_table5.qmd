@@ -1,0 +1,202 @@
+---
+format: 
+  pdf:
+    geometry: top=2cm, bottom=2cm, left=1.75cm, right=1.75cm
+    header-includes:
+      - \usepackage{makecell}
+editor: visual
+execute:
+  echo: false
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(haven)
+library(fixest)
+library(modelsummary)
+library(gt)
+```
+
+## Business Profit results
+
+We reproduce Table 5 from:
+
+> Anderson, S., Chandy, R., & Zia, B. (2018). *Pathways to Profits: The Impact of Marketing versus Finance Skills on Business Performance.* Management Science, 64(12), 5551–5580. https://doi.org/10.1287/mnsc.2017.2920
+
+```{r data-load}
+dta <- read_dta("data/external/acz2018.dta")
+
+TREATMENTS <- c("Treatment_FIN", "Treatment_MKT")
+CONTROLS <- c(
+	"Gender", "Age", "Children_total", "Race_SAblackcolored",
+	"Race_Foreigner", "Educ_high", "Operating_yearstotal",
+	"CapStart_total", "Activity_Hours", "pre_Loan_formal",
+	"pre_Structure_type", "pre_Employees1_composite", "FormalReg"
+)
+INDFE <- c(
+	"Ind2_SIC15", "Ind2_SIC17", "Ind2_SIC23", "Ind2_SIC25",
+	"Ind2_SIC34", "Ind2_SIC41", "Ind2_SIC54", "Ind2_SIC56",
+	"Ind2_SIC57", "Ind2_SIC58", "Ind2_SIC59", "Ind2_SIC72",
+	"Ind2_SIC73", "Ind2_SIC75", "Ind2_SIC76", "Ind2_SIC83"
+)
+YVARS <- c(
+	"Profits1_aidedrecall_w1", "Profits2_anchored_w1",
+	"Profits3_composite_w1", "Profits3_composite_IHS"
+)
+```
+
+```{r Table5, results='asis'}
+reg_eq <- function(y) {
+	as.formula(paste(
+			y, "~", 
+			paste(TREATMENTS, collapse = " + "), 
+			"+", paste0("pre_", y), "+",
+			paste(CONTROLS, collapse = " + "), "+",
+			paste(INDFE, collapse = " + ") 
+		))
+}
+
+my_fmt <- function(x) formatC(
+	as.numeric(x), format="f", digits=3, big.mark=","
+)
+
+df <- dta %>% filter(Survivorship==1)
+mods <- unlist(lapply(YVARS, function(y) {list(
+	feols(
+		reg_eq(y), 
+		data = df %>% filter(T_survey_round==2), 
+		se = "hetero"
+	),
+	feols(
+		reg_eq(y), 
+		data = df %>% filter(T_survey_round==3), 
+		se = "hetero"
+	)
+)}), recursive = FALSE)
+
+ctrls <- c(
+	"Baseline dependent variable other controls, and industry dummies",
+	rep ("Yes", 7)
+)
+row_mat <- matrix(NA_character_, nrow = 4, ncol = 8)
+row_mat[1,] <- ctrls
+row_mat[2, 1] <- "Mean of dependent variable in control group"
+row_mat[3, 1] <- "Std. dev. of dependent variable in control group"
+row_mat[4, 1] <- "Test: A - B = 0 (p-value)"
+
+dvar <- function(rd, func) {
+	dvar <- df %>% 
+	filter(Treatment_FIN == 0, Treatment_MKT == 0, T_survey_round == rd) %>% 
+	select(all_of(YVARS)) 
+	my_fmt(
+		unlist(lapply(dvar, func, na.rm = TRUE))
+	)
+} 
+
+row_mat[2, c(3, 5, 7)] <- dvar(2, mean)[2:4]
+row_mat[3, c(3, 5, 7)] <- dvar(2, sd)[2:4]
+row_mat[2, c(2, 4, 6, 8)] <- dvar(3, mean)
+row_mat[3, c(2, 4, 6, 8)] <- dvar(3, sd)
+row_mat[4, 2:8] <- unlist(lapply(mods, function(x)
+	my_fmt(marginaleffects::hypotheses(x, "b2 = b3")$p.value)
+))[2:8]
+ctrls <- data.frame(row_mat)
+ attr(ctrls, "position") <- c(5, NA, NA, NA)
+names(mods) <- rep(c("Midline", "End line"), 4)
+
+notes <- "Notes. This table presents analysis for business profits. Columns (1) and (2) present the simple recall estimate, which asked respondents for
+their profits over the last month. This question was not asked at midline. Columns (3) and (4) present anchored and adjusted measures for
+profits that were estimated by going through detailed steps of calculating sales and costs with the respondent, allowing for adjustments and
+comparison. The estimates in the first four columns are winsorized on both tails at the 1% level. Columns (5) and (6) present a composite
+measure of profits, which is simply the average of the first two measures. Columns (7) and (8) present the inverse hyperbolic sine transformation
+measures for profits. All regressions include the baseline value of the dependent variable, controls for owner and business characteristics at
+baseline, as well as a full set of business industry fixed effects. Robust standard errors are reported in parentheses.
+*, **, and *** denote statistical significance at the 10%, 5%, and 1% levels, respectively."
+
+tab <- modelsummary(
+	mods[2:8], 
+	output = "gt",
+	fmt = my_fmt, 
+	estimate = "{estimate}{stars}",
+	stars = c(`***` = 0.01, `**` = 0.05, `*` = 0.10),
+	coef_map = c(
+		"Treatment_FIN" = "Assigned to finance training (A)",
+		"Treatment_MKT" = "Assigned to marketing training (B)" 
+	),
+	gof_map = list(
+		list(raw = "r.squared", clean = "R-squared", fmt = my_fmt),
+		list(raw = "nobs", clean = "Sample Size", fmt = fmt_sprintf("%d"))
+	),
+	add_rows = ctrls
+) %>%
+	cols_add("Midline     " = c("—", "", "—", rep("", 7)), .after = 1) %>%
+  cols_align(
+    align = "center",
+    columns = c("Midline     ")   
+  ) 
+
+cnames <- names(tab$`_data`) 
+
+tab <- tab %>%
+	cols_width(cnames[1] ~ pct(40), cnames[2:7] ~ pct(14), cnames[8:9] ~ pct(12)) %>%
+	tab_style(
+	  style = cell_borders(sides = c("all"), color = NULL),
+	  locations = cells_body()
+  ) %>%
+	tab_spanner(label = 'Business profits: Simple recall', columns = 2:3) %>%
+	tab_spanner(label = 'Business profits: Anchored and adjusted', columns = 4:5) %>%
+	tab_spanner(label = 'Business profits: Composite measure', columns = 6:7) %>%
+	tab_spanner(label = 'Business profits: IHS transformation', columns = 8:9) %>%
+	tab_footnote(notes) %>%
+	tab_options(quarto.disable_processing = TRUE)
+
+tab_latex <- tab %>% as_latex() %>% 
+	str_replace_all(
+		fixed("Business profits: Simple recall"), 
+		"\\makecell{Business profits: \\\\ Simple recall}"
+	) %>%
+	str_replace_all(
+		fixed("Business profits: Anchored and adjusted"), 
+		"\\makecell{Business profits: \\\\ Anchored and adjusted}"
+	) %>% 	
+	str_replace_all(
+		fixed("Business profits: Composite measure"), 
+		"\\makecell{Business profits: \\\\ Composite measure}"
+	) %>% 
+	str_replace_all(
+		fixed("Business profits: IHS transformation"), 
+		"\\makecell{Business profits: \\\\ IHS transformation}"
+	) %>%
+	str_replace(
+		fixed(">{\\raggedright\\arraybackslash}"),
+		">{\\raggedright\\hangindent=0.5cm\\hangafter=1\\arraybackslash}"
+	) %>%
+	str_replace(fixed("Notes"), "\\textit{Notes}") %>%
+	str_replace(fixed("R-squared"), "\\textit{R}-squared") %>%
+	str_replace(
+		fixed("*, **, and ***"),
+		"\n\\noindent\\hspace{0.5cm} *, **, and ***"
+	) %>%
+	str_replace(
+		fixed("\\toprule"),
+		paste(
+			"\\toprule\n & (1) & (2) & (3) & (4) & (5) & (6) & (7) & (8) \\\\",
+			"\\cmidrule(lr){2-3} \\cmidrule(lr){4-5}", 
+			"\\cmidrule(lr){6-7} \\cmidrule(lr){8-9}"
+		)
+	) %>%
+	str_replace(
+		fixed("\\begin{longtable}"),
+		"\\resizebox{\\linewidth}{!}{\\begin{tabular}"
+	) %>%
+	str_replace(
+		fixed("\\end{longtable}"),
+		"\\end{tabular}}"
+	) %>% 
+	str_replace(
+		fixed("\\begin{minipage}"),
+		"\\scriptsize\\begin{minipage}"
+	)
+
+cat(tab_latex)
+```

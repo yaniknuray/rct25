@@ -1,0 +1,196 @@
+---
+title: "A Simulated DiD Analysis"
+format: pdf
+execute:
+  warnings: false
+  messages: false
+---
+
+```{r Setup}
+suppressWarnings(suppressPackageStartupMessages({
+	library(modelsummary)
+	library(fixest)
+	library(gt)
+}))
+source("code/did_sim_utils.R")
+
+# Ensure reproducibility by setting a seed for the random number generator
+# If you comment this out you will get a new random sample each call but
+# the results for the repeated simulation results will remain constant
+# as they are pre-run based on the seed set in `code/did_sim_create_results.R`
+
+set.seed(04)
+```
+
+### The Simulated Data
+
+We use a simulated sample inspired by [Petersen (RFS, 2009)](https://doi.org/10.1093/rfs/hhn053). The sample is based on `r NCOUNTRIES` 'countries'. Each country consists of `r NFIRMS` 'firms'. The panel is `r NYEARS` 'years' long.
+
+We simulate a normally distributed outcome variable $y$. For each firm $f$ in each country $c$, the outcome variable for the first year ($y_{c,f,1}$) is modeled to be
+
+$y_{c,f,1} = \gamma_c + \lambda_f + \psi_y + \varepsilon_{c,1} + \varepsilon_{f,1}$
+
+with $\gamma_c, \lambda_f, \psi_y, \varepsilon_{c,1}, \varepsilon_{f,1} \sim \sqrt{\frac{1}{5}}\mathcal{N}(0,1)$
+
+
+Meaning that in the first year, y is simply the sum of five normally distributed random variables, weighted so that $\sigma_y$ = 1. The first three terms ($gamma_c$, $lambda_f$, and $psi_y$) represent country, firm, and year fixed effects.
+
+In the next period however, we model the country- and firm-level error terms ($\varepsilon_c$ and $\varepsilon_f$) both to autocorrelated by the factors $\rho_{c}$ and $\rho_f$ so that
+
+$\varepsilon_{c,y} = \rho_{c}\varepsilon_{c,y-1} + \sqrt{1-\rho_{c}^2}\mathcal{N}(0,1)$
+
+and
+
+$\varepsilon_{f,y} = \rho_{f}\varepsilon_{f,y-1} + \sqrt{1-\rho_{f}^2}\mathcal{N}(0,1)$
+
+This implies that the dependent variable $y$ is random but has 
+
+- stationary country-, firm- and time-level components and 
+- an error term that is clustered by country and by firm.
+
+
+## Injecting a Treatment Effect
+
+We now pick half of the countries randomly. These countries are assumed to receive treatment in year `r YEAR_TREATMENT`. We inject an effect size of `r EFFECT_SIZE`. As $y$ has a baseline standard deviation of 1, this can be interpreted as a small effect in Cohen's d terms.
+
+Let's see how the data look by year and treatment group.
+
+```{r, fig.align="center"}
+# Take a look at the sim_sample() function in `code/did_sim_utils.R` to learn
+# how we implemented the simulation in code.
+
+smp <- sim_sample()
+
+ggplot(smp, aes(x = year, y = y, color = treatment, group = treatment)) +
+	geom_pointrange(
+		stat = "summary",
+		fun = mean, 
+		fun.min = function(x) mean(x) - 1.96*sd(x)/sqrt(length(x)), 
+		fun.max = function(x) mean(x) + 1.96*sd(x)/sqrt(length(x)) 
+	) +
+	scale_x_continuous(breaks = 1:NYEARS) +
+	labs(x = "Year", y = "Y", color = "Group") +
+	scale_color_discrete(labels = c("Control", "Treatment")) + 
+	theme_minimal() +
+	theme(panel.grid.minor = element_blank())
+```
+
+Wild, right? This is mostly because of the year fixed effects $\psi_y$. if you visualize the data using a typical event study plot, everything looks much nicer.
+
+```{r, fig.align="center"}
+est_did <- feols(y ~ i(year, treatment, 5) | firm + year, smp)
+iplot(est_did)
+```
+
+If these data were "real" they would look almost "too good to be true". 
+
+
+### Comparing various DiD-Models
+
+Now we can compare the different types of estimators for this simulated sample. We will compare the following estimation methods: 
+
+- A standard difference-in-differences estimator (pooling the pre and post-treatment observations)
+- A two-way fixed effects difference-in-differences estimator with various standard error clustering: none, by firm, by country^[We do not need and should not use two-way clustering here as our clusters are nested (each firm belongs to one and only one country).]
+
+```{r}
+mods <- est_models(smp)
+mstats <- create_stats(mods)
+
+names(mods) <- c("Standard DiD", rep("Two-Way FE", 3))
+my_fmt <- function(x, format = "f", digits = 3) formatC(
+	as.numeric(x), format = format, digits = digits, big.mark=","
+)
+modelsummary(
+	mods,
+	fmt = my_fmt, 
+	estimate = "{estimate}{stars}",
+	stars = c(`***` = 0.01, `**` = 0.05, `*` = 0.10),
+	coef_map = c(
+		"postTRUE" = "post",
+		"treatmentTRUE" = "treatment", 
+		"postTRUE:treatmentTRUE" = "post × treatment", 
+		"treatedTRUE" = "treated"
+	),
+	gof_map = list(
+		list(raw = "FE:firm", clean = "FE: firm", fmt = 0),
+		list(raw = "FE:year", clean = "FE: year", fmt = 0),
+		list(raw = "vcov.type", clean = "Clustering", fmt = 0),
+		list(raw = "r.squared", clean = "R-squared", fmt = 3),
+		list(raw = "nobs", clean = "Sample Size", fmt = 0)
+	)
+)
+```
+
+As you can see from the regression output, the DiD-estimators are the same (`r format(mods[[1]]$coeftable[4,1], digits = 3)`) across all models, but their standard errors vary across specifications, with the one clustered by country being much larger than the others. 
+
+
+### Findings from a Monte Carlo Simulation 
+
+One advantage of simulating data generating processes is that we can re-run the sample generation multiple times. With this [Monte Carlo Simulation](https://en.wikipedia.org/wiki/Monte_Carlo_method), we can verify whether the identical estimators were just random luck and also get an idea about the correct standard error for this specific data generating process.
+
+So, let's do this exercise 1,000 times and compare the estimators from the Standard DiD model with the ones from the two-way fixed effect model. 
+
+```{r, fig.align="center"}
+# I have prepped the simulation results by running 
+# `code/did_sim_create_results.R`
+sim_results <- readRDS("data/generated/did_sim_results.rds")
+
+# The different clustering only affects the model's standard errors 
+# and not the coefficient estimate so it suffices to compare the estimates
+# of the standard DiD with one two-way fixed effect variant,
+ggplot(
+	aes(x = est, group = model, color = model), 
+	data = sim_results %>% filter(model %in% c("simple_did", "twfe_did_iid"))
+) +
+	geom_density() +
+	scale_color_discrete(labels = c("Standard DiD", "Two-Way FE DiD")) +
+	labs(x = "Estimate", y = "Density", color = "Model type") +
+	theme_minimal()
+```
+
+OK. The two estimator's density curves fully overlap, meaning that for this well-specified data generating process, the standard DiD model creates the same estimates as a two-way fixed effect model. 
+
+The standard deviation of our 1,000 estimators is `r format(sd(sim_results$est), digits = 3)`. This is close to the standard error of the two-way fixed model with clustering by country (`r format(mods[[4]]$coeftable[1,2], digits = 3)`) but much larger than the other standard errors, e.g. the one for the two-way fixed model with clustering by firm (`r format(mods[[3]]$coeftable[1,2], digits = 3)`).
+
+We can now assess whether the standard erros reported by the various models are correct by comparing their averages to the actual standard deviation of the estimator (`r format(sd(sim_results$est), digits = 3)`). In addition, we can take a look at the power of the models and their likelihood to generate Type I errors, meaning to falsely produce significant findings.
+
+```{r}
+sim_result_avgs <- sim_results %>% group_by(model) %>% summarise(
+	`Mean standard error` = mean(se),
+	`Power of test (%)` = 100 * mean(lb > 0),
+	`Type 1 Error (%)` = 100 * mean(lb > EFFECT_SIZE | ub < EFFECT_SIZE)
+) %>% 
+	ungroup() %>%
+	mutate(model = factor(
+		model, 
+		levels = c(
+			"simple_did", "twfe_did_iid", 
+			"twfe_did_firm_cl", "twfe_did_country_cl"
+		),
+		labels = c(
+			"Standard DiD", "TWFE DiD no clusters", 
+			"TWFE DiD firm clusters", "TWFE DiD country clusters"
+		)
+	)) %>%
+	rename(Model = model) %>%
+	arrange(Model)
+
+sim_result_avgs	%>% gt() %>% 
+	fmt_number(columns = `Mean standard error`, decimals = 3) %>%
+	cols_align("left", Model)
+```
+
+As you can see, only the standard errors generated by the two-way fixed effect model with country-level clustering are correct in the sense that they match the actual distribution of the simulated estimates. The other standard errors are too narrow. This causes the other models to generate 95% confidence intervals that often do not include the true effect of `r EFFECT_SIZE` (Type 1 Error). Only for country-level clustering this error rate is about 5% as it should be. 
+
+Finally, let's take a look at power. Power is the likelihood that the model generates an estimate that is significantly different from zero. It is foremost determined by the effect size that we simulate or expect in real data. Here, we expect a relatively small effect size. Next, power dependends on the size of the used sample. Here, we are using a massive sample (`r NCOUNTRIES` countries times `r NFIRMS` firms times `r NYEARS` years = `r format(nrow(smp), big.mark = ',')` observations). Larger samples reduce standard errors, yielding more power. Finally, clustering implies that standard errors are essentially estimated at the cluster level. This means that the power of the analysis will be affected by the number of cluster units (`r NCOUNTRIES` in our case). The more units you have, the better.
+
+In our simulation you see that clustering by country reduces the power from virtually 100% to `r format(pull(sim_result_avgs[4,3]), digits = 3)`%. Still not bad but remember that we have a massive sample and a very clean data generating process. Real life data will be messier and samples will be smaller, yielding much less power.
+
+
+### Next steps
+
+This concludes this little simulation exercise. If you want to explore further and learn more, here are some topics to think about:
+
+- How would a variant of a Standard DiD model that uses country-level clusters perform?
+- When you vary the effect size how do you expect power to react? When will it fall below the often required power hurdle of 80%?
+- What happens when you change sample parameters, e.g. decrease the number of countries or number of firms per countries? Which parameter do you expect to be more influential for confidence intervals and power?

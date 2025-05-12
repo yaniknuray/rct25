@@ -9,7 +9,7 @@ ob <- readRDS("data/generated/orbis_panel_de.rds")
 log_info("Filtering Berlin observations")
 bp <- ob %>% filter(city_native == "Berlin")
 
-fname <- "data/precomputed/orbis_panel_berlin.rds"
+fname <- "data/generated/orbis_panel_berlin.rds"
 log_info(
 	"Saving Berlin panel ({format(nrow(bp), big.mark = ',')} obs) to '{fname}'"
 )
